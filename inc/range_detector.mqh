@@ -1,0 +1,72 @@
+//+------------------------------------------------------------------+
+//|                                               range_detector.mqh |
+//|                                          XAUUSD-GOD MT5 Project |
+//+------------------------------------------------------------------+
+#ifndef INC_RANGE_DETECTOR_MQH
+#define INC_RANGE_DETECTOR_MQH
+
+#include "config_inputs.mqh"
+
+//+------------------------------------------------------------------+
+//| Scans last lookback_bars CLOSED candles for consolidation box   |
+//| Returns true and sets box_high/box_low if valid range found     |
+//| Returns false if invalid params, insufficient data, or width OOB|
+//+------------------------------------------------------------------+
+bool BuildRangeBox(const int lookback_bars, double &box_high, double &box_low)
+{
+   // Parameter validation
+   if(lookback_bars <= 1)
+      return false;
+   
+   if(Range_Min_Width_Points <= 0 || Range_Max_Width_Points <= 0 || 
+      Range_Max_Width_Points < Range_Min_Width_Points)
+      return false;
+   
+   // Get symbol point value
+   double point = SymbolInfoDouble(Symbol(), SYMBOL_POINT);
+   if(point <= 0.0)
+      return false;
+   
+   // Initialize range extremes
+   double hi = -DBL_MAX;
+   double lo = DBL_MAX;
+   
+   // Scan closed bars [1..lookback_bars]
+   for(int i = 1; i <= lookback_bars; i++)
+   {
+      double bar_high = iHigh(Symbol(), PERIOD_CURRENT, i);
+      double bar_low = iLow(Symbol(), PERIOD_CURRENT, i);
+      
+      // Check for invalid data
+      if(bar_high <= 0.0 || bar_low <= 0.0)
+         return false;
+      
+      // Update range extremes
+      if(bar_high > hi)
+         hi = bar_high;
+      if(bar_low < lo)
+         lo = bar_low;
+   }
+   
+   // Validate computed range
+   if(hi <= lo)
+      return false;
+   
+   // Calculate width in points
+   double width_points = (hi - lo) / point;
+   
+   // Width boundary validation
+   if(width_points < Range_Min_Width_Points)
+      return false;
+   
+   if(width_points > Range_Max_Width_Points)
+      return false;
+   
+   // Valid range found - set output parameters
+   box_high = hi;
+   box_low = lo;
+   
+   return true;
+}
+
+#endif // INC_RANGE_DETECTOR_MQH

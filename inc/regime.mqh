@@ -1,0 +1,21 @@
+#ifndef INC_REGIME_MQH
+#define INC_REGIME_MQH
+
+#include "types.mqh"
+#include "config_inputs.mqh"
+#include "indicators.mqh"
+
+Regime DetectRegime()
+{
+   double adx = ADX(1);
+   
+   if(adx == EMPTY_VALUE)
+      return REGIME_RANGE;
+   
+   if(adx >= ADX_Trend_Threshold)
+      return REGIME_TREND;
+   else
+      return REGIME_RANGE;
+}
+
+#endif // INC_REGIME_MQH
