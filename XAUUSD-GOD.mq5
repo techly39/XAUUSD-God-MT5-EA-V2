@@ -1,41 +1,38 @@
 //+------------------------------------------------------------------+
 //|                                                  XAUUSD-GOD.mq5 |
 //|                                      XAUUSD Algorithmic Trading |
-//|                                                   FIXED VERSION  |
+//|                                                   V2 - M5 SCALPER|
 //+------------------------------------------------------------------+
 #property copyright "XAUUSD-GOD"
 #property link      ""
-#property version   "1.01"
+#property version   "2.00"
 #property strict
 
-#include <inc/types.mqh>
-#include <inc/constants.mqh>
-#include <inc/config_inputs.mqh>
-#include <inc/utils.mqh>
-#include <inc/logging.mqh>
-#include <inc/indicators.mqh>
-#include <inc/regime.mqh>
-#include <inc/filters.mqh>
-#include <inc/spread_vol_filter.mqh>
-#include <inc/range_detector.mqh>
-#include <inc/liquidity_sweep.mqh>
-#include <inc/breakout.mqh>
-#include <inc/risk.mqh>
-#include <inc/orders.mqh>
-#include <inc/trade_manager.mqh>
+#include "inc/types.mqh"
+#include "inc/constants.mqh"
+#include "inc/config_inputs.mqh"
+#include "inc/utils.mqh"
+#include "inc/logging.mqh"
+#include "inc/indicators.mqh"
+#include "inc/filters.mqh"
+#include "inc/spread_vol_filter.mqh"
+#include "inc/risk.mqh"
+#include "inc/orders.mqh"
+#include "inc/trade_manager.mqh"
 
-input group "XAUUSD-GOD Settings"
+input group "XAUUSD-GOD V2 Settings"
 
-datetime g_lastBar_M15 = 0;  // FIXED: Changed from M5 to M15
+datetime g_lastBar_M5 = 0;
+datetime g_noTradeUntil = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-  LogInit("XAUUSD-GOD-M15");
+  LogInit("XAUUSD-GOD-M5-V2");
   const string sym = _Symbol;
-  const ENUM_TIMEFRAMES tf = PERIOD_M15;  // FIXED: Explicitly M15
+  const ENUM_TIMEFRAMES tf = PERIOD_M5;
 
   if(!InitIndicators(sym, tf))
   {
@@ -48,10 +45,13 @@ int OnInit()
     LogError("INIT","Trading not allowed for symbol", GetLastError()); 
   }
 
-  datetime t0 = iTime(sym, PERIOD_M15, 0);  // FIXED: M15
-  if(t0 > 0) g_lastBar_M15 = t0;
+  datetime t0 = iTime(sym, PERIOD_M5, 0);
+  if(t0 > 0) g_lastBar_M5 = t0;
 
-  LogEvent("INIT","OK - M15 Timeframe");
+  g_noTradeUntil = 0;
+  EnsureTradeInit();
+
+  LogEvent("INIT","OK - M5 Timeframe - Scalping Mode");
   return(INIT_SUCCEEDED);
 }
 
@@ -69,13 +69,19 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 bool PreTradeGate(const datetime server_time)
 {
-  if(!TM_DD_GateOK())        return false;
+  if(!TM_DD_GateOK()) return false;
+  if(!TM_Week_GateOK()) return false;
+  if(g_noTradeUntil > 0 && server_time < g_noTradeUntil) return false;
   if(!CanTradeNow(_Symbol, server_time)) return false;
+  
+  long margin_level = AccountInfoInteger(ACCOUNT_MARGIN_LEVEL);
+  if(margin_level > 0 && margin_level < 200) return false;
+  
   return true;
 }
 
 //+------------------------------------------------------------------+
-//| Build signal based on regime                                     |
+//| Build signal based on M5 scalping logic                         |
 //+------------------------------------------------------------------+
 bool BuildSignal(Signal &out_sig)
 {
@@ -84,31 +90,246 @@ bool BuildSignal(Signal &out_sig)
   out_sig.entry = 0.0;
   out_sig.sl = 0.0;
   out_sig.tp = 0.0;
-  out_sig.reason = "";
+  out_sig.reason = REASON_SCALP;
 
-  Regime r = DetectRegime();
-  LogEvent("SIGNAL", "Regime=" + (r == REGIME_RANGE ? "RANGE" : "TREND"));
+  // Check if we already have a position (one at a time rule)
+  if(PositionsTotal() > 0)
+  {
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+      if(PositionGetTicket(i) > 0)
+      {
+        if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+           PositionGetInteger(POSITION_MAGIC) == (MAGIC_BASE + Magic_Offset))
+        {
+          LogEvent("SIGNAL", "Position already open - skip new signal");
+          return false;
+        }
+      }
+    }
+  }
+
+  // Read indicators for last closed bar
+  double adx = ADX(1);
+  double rsi = RSI(1);
+  double ema = EMA(1);
   
-  if(r == REGIME_RANGE)
+  if(adx == EMPTY_VALUE || rsi == EMPTY_VALUE || ema == EMPTY_VALUE)
   {
-    Signal s = ScanAndSignal_LiquiditySweep();
-    if(s.valid)
-    {
-      out_sig = s;
-      return true;
-    }
+    LogEvent("SIGNAL", "Invalid indicator values");
     return false;
   }
-  else
+
+  // Get bar data
+  double c1 = iClose(_Symbol, PERIOD_M5, 1);
+  double o1 = iOpen(_Symbol, PERIOD_M5, 1);
+  double h1 = iHigh(_Symbol, PERIOD_M5, 1);
+  double l1 = iLow(_Symbol, PERIOD_M5, 1);
+  double c2 = iClose(_Symbol, PERIOD_M5, 2);
+  double h2 = iHigh(_Symbol, PERIOD_M5, 2);
+  double l2 = iLow(_Symbol, PERIOD_M5, 2);
+  
+  if(c1 == 0.0 || c1 == EMPTY_VALUE) return false;
+
+  // Determine trend mode and bias
+  bool trendMode = (adx >= ADX_Trend_Threshold);
+  Direction bias = DIR_NONE;
+  
+  if(trendMode)
   {
-    Signal s = ScanAndSignal_Breakout();
-    if(s.valid)
+    if(c1 > ema) bias = DIR_LONG;
+    else if(c1 < ema) bias = DIR_SHORT;
+    
+    // Check EMA slope for confirmation
+    double ema2 = EMA(2);
+    if(ema2 != EMPTY_VALUE)
     {
-      out_sig = s;
-      return true;
+      if(bias == DIR_LONG && ema < ema2) bias = DIR_NONE; // EMA should be rising
+      if(bias == DIR_SHORT && ema > ema2) bias = DIR_NONE; // EMA should be falling
     }
-    return false;
   }
+
+  LogEvent("SIGNAL", "ADX=" + DoubleToString(adx, 2) + " Mode=" + (trendMode ? "TREND" : "RANGE") + 
+           " RSI=" + DoubleToString(rsi, 2) + " Bias=" + (bias == DIR_LONG ? "LONG" : (bias == DIR_SHORT ? "SHORT" : "NONE")));
+
+  double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+  if(point <= 0.0) return false;
+
+  // TREND MODE - Pullback entries
+  if(trendMode && bias != DIR_NONE)
+  {
+    // LONG setup: oversold in uptrend + bullish reversal
+    if(bias == DIR_LONG && rsi <= RSI_Buy_Threshold)
+    {
+      // Check for pullback (at least one recent bearish bar)
+      bool pullback = (c2 < c1) || (c1 < o1);
+      
+      // Check for bullish reversal pattern
+      bool reversal = (c1 > o1) && (c1 > h2);
+      
+      if(pullback && reversal)
+      {
+        // Calculate SL at swing low
+        double swing_low = MathMin(l1, l2);
+        double sl_buffer = 5 * point;
+        double sl_price = swing_low - sl_buffer;
+        
+        MqlTick tick;
+        if(!SymbolInfoTick(_Symbol, tick)) return false;
+        
+        double entry = tick.ask;
+        double sl_dist_pts = (entry - sl_price) / point;
+        
+        if(sl_dist_pts >= MIN_SL_POINTS)
+        {
+          double tp_price = entry + (1.5 * (entry - sl_price));
+          double tp_dist_pts = (tp_price - entry) / point;
+          
+          if(tp_dist_pts >= MIN_TP_POINTS)
+          {
+            out_sig.valid = true;
+            out_sig.dir = DIR_LONG;
+            out_sig.entry = entry;
+            out_sig.sl = sl_price;
+            out_sig.tp = tp_price;
+            
+            LogEvent("SIGNAL", "✅ LONG SCALP: Pullback reversal in uptrend (RSI=" + 
+                     DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
+                     DoubleToString(tp_dist_pts, 1) + "pts)");
+            return true;
+          }
+        }
+      }
+    }
+    
+    // SHORT setup: overbought in downtrend + bearish reversal
+    if(bias == DIR_SHORT && rsi >= RSI_Sell_Threshold)
+    {
+      // Check for pullback (at least one recent bullish bar)
+      bool pullback = (c2 > c1) || (c1 > o1);
+      
+      // Check for bearish reversal pattern
+      bool reversal = (c1 < o1) && (c1 < l2);
+      
+      if(pullback && reversal)
+      {
+        // Calculate SL at swing high
+        double swing_high = MathMax(h1, h2);
+        double sl_buffer = 5 * point;
+        double sl_price = swing_high + sl_buffer;
+        
+        MqlTick tick;
+        if(!SymbolInfoTick(_Symbol, tick)) return false;
+        
+        double entry = tick.bid;
+        double sl_dist_pts = (sl_price - entry) / point;
+        
+        if(sl_dist_pts >= MIN_SL_POINTS)
+        {
+          double tp_price = entry - (1.5 * (sl_price - entry));
+          double tp_dist_pts = (entry - tp_price) / point;
+          
+          if(tp_dist_pts >= MIN_TP_POINTS)
+          {
+            out_sig.valid = true;
+            out_sig.dir = DIR_SHORT;
+            out_sig.entry = entry;
+            out_sig.sl = sl_price;
+            out_sig.tp = tp_price;
+            
+            LogEvent("SIGNAL", "✅ SHORT SCALP: Pullback reversal in downtrend (RSI=" + 
+                     DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
+                     DoubleToString(tp_dist_pts, 1) + "pts)");
+            return true;
+          }
+        }
+      }
+    }
+  }
+  
+  // RANGE MODE - Extreme reversals
+  if(!trendMode)
+  {
+    // LONG setup: oversold + bullish reversal from bottom
+    if(rsi <= RSI_Buy_Threshold)
+    {
+      bool reversal = (c1 > o1) && (c1 > h2);
+      
+      if(reversal)
+      {
+        double swing_low = MathMin(l1, l2);
+        double sl_buffer = 5 * point;
+        double sl_price = swing_low - sl_buffer;
+        
+        MqlTick tick;
+        if(!SymbolInfoTick(_Symbol, tick)) return false;
+        
+        double entry = tick.ask;
+        double sl_dist_pts = (entry - sl_price) / point;
+        
+        if(sl_dist_pts >= MIN_SL_POINTS)
+        {
+          double tp_price = entry + (1.5 * (entry - sl_price));
+          double tp_dist_pts = (tp_price - entry) / point;
+          
+          if(tp_dist_pts >= MIN_TP_POINTS)
+          {
+            out_sig.valid = true;
+            out_sig.dir = DIR_LONG;
+            out_sig.entry = entry;
+            out_sig.sl = sl_price;
+            out_sig.tp = tp_price;
+            
+            LogEvent("SIGNAL", "✅ LONG SCALP: Range reversal from oversold (RSI=" + 
+                     DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
+                     DoubleToString(tp_dist_pts, 1) + "pts)");
+            return true;
+          }
+        }
+      }
+    }
+    
+    // SHORT setup: overbought + bearish reversal from top
+    if(rsi >= RSI_Sell_Threshold)
+    {
+      bool reversal = (c1 < o1) && (c1 < l2);
+      
+      if(reversal)
+      {
+        double swing_high = MathMax(h1, h2);
+        double sl_buffer = 5 * point;
+        double sl_price = swing_high + sl_buffer;
+        
+        MqlTick tick;
+        if(!SymbolInfoTick(_Symbol, tick)) return false;
+        
+        double entry = tick.bid;
+        double sl_dist_pts = (sl_price - entry) / point;
+        
+        if(sl_dist_pts >= MIN_SL_POINTS)
+        {
+          double tp_price = entry - (1.5 * (sl_price - entry));
+          double tp_dist_pts = (entry - tp_price) / point;
+          
+          if(tp_dist_pts >= MIN_TP_POINTS)
+          {
+            out_sig.valid = true;
+            out_sig.dir = DIR_SHORT;
+            out_sig.entry = entry;
+            out_sig.sl = sl_price;
+            out_sig.tp = tp_price;
+            
+            LogEvent("SIGNAL", "✅ SHORT SCALP: Range reversal from overbought (RSI=" + 
+                     DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
+                     DoubleToString(tp_dist_pts, 1) + "pts)");
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 //+------------------------------------------------------------------+
@@ -121,21 +342,28 @@ void OnTick()
   TM_DD_Update(now);
   TM_ManageOpenPositions();
 
-  if(!NewBarGuard(PERIOD_M15, g_lastBar_M15)) return;  // FIXED: M15
+  if(!NewBarGuard(PERIOD_M5, g_lastBar_M5)) return;
 
   if(!PreTradeGate(now)) 
   {
     int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
     double dd = DD_CurrentPercent();
     double atr_val = ATR(1);
+    long margin = AccountInfoInteger(ACCOUNT_MARGIN_LEVEL);
     string reason = "";
     
     if(!TM_DD_GateOK())
       reason += "DD=" + DoubleToString(dd, 2) + "% ";
-    
-    reason += "Spread=" + IntegerToString(spread);
-    if(atr_val != EMPTY_VALUE)
-      reason += " ATR=" + DoubleToString(atr_val, 2);
+    if(spread > Max_Spread_Points)
+      reason += "Spread=" + IntegerToString(spread) + "pts ";
+    if(atr_val != EMPTY_VALUE && atr_val < Min_ATR_Points)
+      reason += "ATR=" + DoubleToString(atr_val, 2) + " ";
+    if(!DayAllowed(now))
+      reason += "Day-Off ";
+    if(g_noTradeUntil > 0 && now < g_noTradeUntil)
+      reason += "Pause-Until=" + TimeToString(g_noTradeUntil) + " ";
+    if(margin > 0 && margin < 200)
+      reason += "Margin=" + IntegerToString(margin) + "% ";
     
     LogEvent("GATE", "Blocked: " + reason);
     return;
@@ -145,15 +373,12 @@ void OnTick()
   
   if(!BuildSignal(sig) || !sig.valid) 
   {
-    Regime r = DetectRegime();
-    double adx_val = ADX(1);
-    string regime_str = (r == REGIME_RANGE ? "RANGE" : "TREND");
-    string msg = "No signal - Regime=" + regime_str;
-    
-    if(adx_val != EMPTY_VALUE)
-      msg += " ADX=" + DoubleToString(adx_val, 2);
-    
-    LogEvent("SIGNAL", msg);
+    return;
+  }
+
+  if(sig.sl <= 0.0 || sig.sl == EMPTY_VALUE)
+  {
+    LogError("TRADE", "Invalid SL=" + DoubleToString(sig.sl, 5), 0);
     return;
   }
 
@@ -164,15 +389,9 @@ void OnTick()
     return;
   }
 
-  double ref_price = (sig.entry > 0.0) ? sig.entry : ((sig.dir == DIR_LONG) ? tick.ask : tick.bid);
-  
-  if(sig.sl <= 0.0 || sig.sl == EMPTY_VALUE)
-  {
-    LogError("TRADE", "Invalid SL=" + DoubleToString(sig.sl, 5), 0);
-    return;
-  }
-
+  double ref_price = (sig.dir == DIR_LONG) ? tick.ask : tick.bid;
   double lot = ComputeLot(ref_price, sig.sl);
+  
   if(lot <= 0.0) 
   { 
     LogEvent("TRADE","lot=0; skip"); 
@@ -180,21 +399,7 @@ void OnTick()
   }
 
   ulong ticket = 0;
-  bool sent = false;
-
-  if(sig.reason == REASON_LIQ_SWEEP)
-  {
-    sent = ExecuteMarketOrder(sig, lot, ticket);
-  }
-  else if(sig.reason == REASON_TREND_BO)
-  {
-    sent = ExecutePendingOrder(sig, lot, Order_Expiration_Min, ticket);
-  }
-  else
-  {
-    LogEvent("TRADE","unknown reason; skip");
-    return;
-  }
+  bool sent = ExecuteMarketOrder(sig, lot, ticket);
 
   if(sent)
     LogEvent("TRADE","✅ SENT: ticket=" + (string)ticket + " reason=" + sig.reason + " lot=" + DoubleToString(lot, 2));
@@ -202,4 +407,3 @@ void OnTick()
     LogError("TRADE","send failed", GetLastError());
 }
 //+------------------------------------------------------------------+
-
