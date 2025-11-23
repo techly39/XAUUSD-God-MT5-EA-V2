@@ -71,4 +71,13 @@ input int    Order_Expiration_Min  = 30;
 input string Order_Comment         = "XAUUSD-GOD-v2";
 input bool   Only_New_Bar          = true;
 
+// ================== Section: Edge Case Protections (all optional per PDF 5.1) =================================
+input group "Edge-Case Protections (Optional)"
+
+input double SpreadSpike_Multiplier = 3.0;           // Spread spike multiplier (≥1.0)
+input int    SpreadSpike_Pause_Minutes = 10;         // Pause duration in minutes
+input int    SpreadSpike_MinSamples = 30;            // Min data points for MA (1-60)
+
+input int    FlashCrash_Threshold_Pips = 500;        // M1 range threshold in pips
+input int    FlashCrash_Pause_Minutes = 30;          // Pause duration in minutes
 #endif // INC_CONFIG_INPUTS_MQH
