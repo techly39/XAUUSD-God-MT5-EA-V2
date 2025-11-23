@@ -342,8 +342,6 @@ void OnTick()
   TM_DD_Update(now);
   TM_ManageOpenPositions();
 
-  if(!NewBarGuard(PERIOD_M5, g_lastBar_M5)) return;
-
   if(!PreTradeGate(now)) 
   {
     int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
@@ -368,6 +366,8 @@ void OnTick()
     LogEvent("GATE", "Blocked: " + reason);
     return;
   }
+  
+  if(!NewBarGuard(PERIOD_M5, g_lastBar_M5)) return;
 
   Signal sig;
   
