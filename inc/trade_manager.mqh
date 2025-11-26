@@ -10,9 +10,15 @@
 #include "orders.mqh"
 #include <Trade/Trade.mqh>
 
+// Daily drawdown tracking
 int    g_dd_day          = -1;
 double g_dd_start_equity = 0.0;
 double g_dd_peak_equity  = 0.0;
+
+// Weekly drawdown tracking
+int    g_last_day_of_week     = -1;
+double g_week_start_equity    = 0.0;
+double g_week_peak_equity     = 0.0;
 
 CTrade g_mgr_trade;
 bool   g_mgr_trade_init = false;
@@ -50,11 +56,39 @@ void DD_Reset(datetime tv)
 
 void DD_UpdateInternal(datetime tv)
 {
+   MqlDateTime dt;
+   TimeToStruct(tv, dt);
+   
+   // Daily reset logic
    if(NewServerDay(tv) || g_dd_day < 0) 
+   {
       DD_Reset(tv);
+      
+      // Weekly reset on Monday
+      if(dt.day_of_week == 1)
+      {
+         g_week_start_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+         g_week_peak_equity = g_week_start_equity;
+      }
+   }
+   
+   // Initialize weekly tracking on first run if not Monday
+   if(g_week_peak_equity <= 0.0)
+   {
+      double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+      g_week_start_equity = eq;
+      g_week_peak_equity = eq;
+   }
+   
+   // Update peaks
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(eq > g_dd_peak_equity) 
       g_dd_peak_equity = eq;
+   if(eq > g_week_peak_equity)
+      g_week_peak_equity = eq;
+   
+   // Track day of week for weekly reset detection
+   g_last_day_of_week = dt.day_of_week;
 }
 
 double DD_CurrentPercent()
@@ -66,6 +100,17 @@ double DD_CurrentPercent()
    if(dd < 0.0) 
       dd = 0.0;
    return dd;
+}
+
+double WeekDD_CurrentPercent()
+{
+   if(g_week_peak_equity <= 0.0)
+      return 0.0;
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double week_dd = (g_week_peak_equity - eq) / g_week_peak_equity * 100.0;
+   if(week_dd < 0.0)
+      week_dd = 0.0;
+   return week_dd;
 }
 
 bool ApplyBreakEven(ulong ticket, long pos_type, double entry_price, double ref_price, double cur_sl)
@@ -206,6 +251,15 @@ bool TM_DD_GateOK()
       return true;
    double dd = DD_CurrentPercent();
    return (dd < Max_Daily_Drawdown_Percent);
+}
+
+bool TM_Week_GateOK()
+{
+   if(Max_Weekly_Drawdown_Percent <= 0.0)
+      return true;
+   
+   double week_dd = WeekDD_CurrentPercent();
+   return (week_dd < Max_Weekly_Drawdown_Percent);
 }
 
 bool TM_ManageOpenPositions()
