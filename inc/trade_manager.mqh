@@ -10,6 +10,13 @@
 #include "orders.mqh"
 #include <Trade/Trade.mqh>
 
+// External reference to global pause timer declared in main EA
+extern datetime g_noTradeUntil;
+
+// Consecutive loss tracking - static variables persist across ticks
+static int g_loss_streak = 0;
+static bool g_position_was_open = false;
+
 // Daily drawdown tracking
 int    g_dd_day          = -1;
 double g_dd_start_equity = 0.0;
@@ -268,6 +275,86 @@ bool TM_ManageOpenPositions()
    MqlTick tick; 
    if(!SymbolInfoTick(_Symbol, tick)) 
       return false;
+
+   // ==================== CONSECUTIVE LOSS TRACKING ====================
+   // Count current open positions for this EA
+   int count = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   {
+      if(PositionSelectByIndex(i))
+      {
+         if(PositionGetInteger(POSITION_MAGIC) == MAGIC_BASE + Magic_Offset &&
+            PositionGetString(POSITION_SYMBOL) == _Symbol)
+         {
+            count++;
+         }
+      }
+   }
+   
+   // If previously there was an open position and now count is 0, a position closed
+   if(g_position_was_open && count == 0)
+   {
+      // Determine outcome of last closed trade
+      double profitSum = 0.0;
+      
+      // Use HistoryDeal to find last closed deal for our magic+symbol
+      datetime since = TimeCurrent() - 86400; // look back last 24h
+      HistorySelect(since, TimeCurrent());
+      long totalDeals = HistoryDealsTotal();
+      
+      for(long i = totalDeals - 1; i >= 0; --i)
+      {
+         ulong dealTicket = HistoryDealGetTicket(i);
+         ulong dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+         string dealSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
+         long dealEntryType = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+         
+         if(dealMagic == MAGIC_BASE + Magic_Offset && dealSymbol == _Symbol &&
+            dealEntryType == DEAL_ENTRY_OUT)
+         {
+            double dealProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT) +
+                               HistoryDealGetDouble(dealTicket, DEAL_COMMISSION) +
+                               HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+            profitSum += dealProfit;
+            // Break after summing (though partial closings would generate multiple deals, profitSum accumulates them)
+            // In our case with no partial, one deal corresponds to entire trade closure
+            break;
+         }
+      }
+      
+      if(profitSum < -0.0001)
+      {
+         // Loss
+         g_loss_streak++;
+         LogEvent("TM", "Trade closed with loss. Loss streak: " + IntegerToString(g_loss_streak));
+      }
+      else if(profitSum > 0.0001)
+      {
+         // Win
+         g_loss_streak = 0;
+         LogEvent("TM", "Trade closed with profit. Loss streak reset.");
+      }
+      else
+      {
+         // Roughly 0 (breakeven)
+         g_loss_streak = 0;
+         LogEvent("TM", "Trade closed at breakeven. Loss streak reset.");
+      }
+      
+      // Check loss streak vs limit
+      if(g_loss_streak >= Consecutive_Loss_Limit && Consecutive_Loss_Limit > 0)
+      {
+         g_loss_streak = 0; // reset streak count after triggering pause
+         g_noTradeUntil = TimeCurrent() + Loss_Pause_Duration_Min * 60;
+         // Log pause event
+         LogEvent("TM", "Max loss streak reached, pausing new trades for " +
+                  IntegerToString(Loss_Pause_Duration_Min) + " min");
+      }
+   }
+   
+   // Update flag for next tick
+   g_position_was_open = (count > 0);
+   // ==================== END CONSECUTIVE LOSS TRACKING ====================
 
    int total = PositionsTotal();
    int lp = total - 1;
