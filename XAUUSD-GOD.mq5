@@ -92,23 +92,6 @@ bool BuildSignal(Signal &out_sig)
   out_sig.tp = 0.0;
   out_sig.reason = REASON_SCALP;
 
-  // Check if we already have a position (one at a time rule)
-  if(PositionsTotal() > 0)
-  {
-    for(int i = 0; i < PositionsTotal(); i++)
-    {
-      if(PositionGetTicket(i) > 0)
-      {
-        if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
-           PositionGetInteger(POSITION_MAGIC) == (MAGIC_BASE + Magic_Offset))
-        {
-          LogEvent("SIGNAL", "Position already open - skip new signal");
-          return false;
-        }
-      }
-    }
-  }
-
   // Read indicators for last closed bar
   double adx = ADX(1);
   double rsi = RSI(1);
@@ -364,6 +347,26 @@ void OnTick()
       reason += "Margin=" + IntegerToString(margin) + "% ";
     
     LogEvent("GATE", "Blocked: " + reason);
+    return;
+  }
+  
+  // One Position at a Time check
+  int myPositions = 0;
+  for(int i = PositionsTotal() - 1; i >= 0; --i)
+  {
+    if(PositionSelectByIndex(i))
+    {
+      if(PositionGetInteger(POSITION_MAGIC) == MAGIC_BASE + Magic_Offset &&
+         PositionGetString(POSITION_SYMBOL) == _Symbol)
+      {
+        myPositions++;
+      }
+    }
+  }
+  
+  if(myPositions > 0)
+  {
+    // Already an open position for this EA, skip new signal
     return;
   }
   
