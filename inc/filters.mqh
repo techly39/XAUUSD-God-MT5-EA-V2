@@ -91,23 +91,4 @@ bool RSIConfirm(const Direction d)
    return false;
 }
 
-//+------------------------------------------------------------------+
-//| Volume confirmation                                               |
-//+------------------------------------------------------------------+
-bool VolumeConfirm()
-{
-   if(Vol_MA_Period <= 0 || Vol_Min_Ratio <= 0.0)
-      return true;
-   
-   double ma = VolumeMA(1);
-   if(ma == EMPTY_VALUE)
-      return false;
-   
-   long vol_arr[1];
-   if(CopyTickVolume(Symbol(), PERIOD_CURRENT, 1, 1, vol_arr) < 1)
-      return false;
-   
-   return ((double)vol_arr[0] >= Vol_Min_Ratio * ma);
-}
-
 #endif // INC_FILTERS_MQH
