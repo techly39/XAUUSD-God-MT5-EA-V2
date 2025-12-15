@@ -8,22 +8,23 @@
 #property version   "2.00"
 #property strict
 
-#include "inc/types.mqh"
-#include "inc/constants.mqh"
-#include "inc/config_inputs.mqh"
-#include "inc/utils.mqh"
-#include "inc/logging.mqh"
-#include "inc/indicators.mqh"
-#include "inc/filters.mqh"
-#include "inc/spread_vol_filter.mqh"
-#include "inc/risk.mqh"
-#include "inc/orders.mqh"
-#include "inc/trade_manager.mqh"
-
-input group "XAUUSD-GOD V2 Settings"
-
+// Global variables must be declared BEFORE includes that reference them
 datetime g_lastBar_M5 = 0;
 datetime g_noTradeUntil = 0;
+
+#include <inc/types.mqh>
+#include <inc/constants.mqh>
+#include <inc/config_inputs.mqh>
+#include <inc/utils.mqh>
+#include <inc/logging.mqh>
+#include <inc/indicators.mqh>
+#include <inc/filters.mqh>
+#include <inc/spread_vol_filter.mqh>
+#include <inc/risk.mqh>
+#include <inc/orders.mqh>
+#include <inc/trade_manager.mqh>
+
+input group "XAUUSD-GOD V2 Settings"
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -74,8 +75,8 @@ bool PreTradeGate(const datetime server_time)
   if(g_noTradeUntil > 0 && server_time < g_noTradeUntil) return false;
   if(!CanTradeNow(_Symbol, server_time)) return false;
   
-  long margin_level = AccountInfoInteger(ACCOUNT_MARGIN_LEVEL);
-  if(margin_level > 0 && margin_level < 200) return false;
+  double margin_level = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+  if(margin_level > 0.0 && margin_level < 200.0) return false;
   
   return true;
 }
@@ -92,7 +93,6 @@ bool BuildSignal(Signal &out_sig)
   out_sig.tp = 0.0;
   out_sig.reason = REASON_SCALP;
 
-  // Read indicators for last closed bar
   double adx = ADX(1);
   double rsi = RSI(1);
   double ema = EMA(1);
@@ -103,7 +103,6 @@ bool BuildSignal(Signal &out_sig)
     return false;
   }
 
-  // Get bar data
   double c1 = iClose(_Symbol, PERIOD_M5, 1);
   double o1 = iOpen(_Symbol, PERIOD_M5, 1);
   double h1 = iHigh(_Symbol, PERIOD_M5, 1);
@@ -114,7 +113,6 @@ bool BuildSignal(Signal &out_sig)
   
   if(c1 == 0.0 || c1 == EMPTY_VALUE) return false;
 
-  // Determine trend mode and bias
   bool trendMode = (adx >= ADX_Trend_Threshold);
   Direction bias = DIR_NONE;
   
@@ -123,12 +121,11 @@ bool BuildSignal(Signal &out_sig)
     if(c1 > ema) bias = DIR_LONG;
     else if(c1 < ema) bias = DIR_SHORT;
     
-    // Check EMA slope for confirmation
     double ema2 = EMA(2);
     if(ema2 != EMPTY_VALUE)
     {
-      if(bias == DIR_LONG && ema < ema2) bias = DIR_NONE; // EMA should be rising
-      if(bias == DIR_SHORT && ema > ema2) bias = DIR_NONE; // EMA should be falling
+      if(bias == DIR_LONG && ema < ema2) bias = DIR_NONE;
+      if(bias == DIR_SHORT && ema > ema2) bias = DIR_NONE;
     }
   }
 
@@ -138,21 +135,15 @@ bool BuildSignal(Signal &out_sig)
   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
   if(point <= 0.0) return false;
 
-  // TREND MODE - Pullback entries
   if(trendMode && bias != DIR_NONE)
   {
-    // LONG setup: oversold in uptrend + bullish reversal
     if(bias == DIR_LONG && rsi <= RSI_Buy_Threshold)
     {
-      // Check for pullback (at least one recent bearish bar)
       bool pullback = (c2 < c1) || (c1 < o1);
-      
-      // Check for bullish reversal pattern
       bool reversal = (c1 > o1) && (c1 > h2);
       
       if(pullback && reversal)
       {
-        // Calculate SL at swing low
         double swing_low = MathMin(l1, l2);
         double sl_buffer = 5 * point;
         double sl_price = swing_low - sl_buffer;
@@ -176,7 +167,7 @@ bool BuildSignal(Signal &out_sig)
             out_sig.sl = sl_price;
             out_sig.tp = tp_price;
             
-            LogEvent("SIGNAL", "✅ LONG SCALP: Pullback reversal in uptrend (RSI=" + 
+            LogEvent("SIGNAL", "LONG SCALP: Pullback reversal in uptrend (RSI=" + 
                      DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
                      DoubleToString(tp_dist_pts, 1) + "pts)");
             return true;
@@ -185,18 +176,13 @@ bool BuildSignal(Signal &out_sig)
       }
     }
     
-    // SHORT setup: overbought in downtrend + bearish reversal
     if(bias == DIR_SHORT && rsi >= RSI_Sell_Threshold)
     {
-      // Check for pullback (at least one recent bullish bar)
       bool pullback = (c2 > c1) || (c1 > o1);
-      
-      // Check for bearish reversal pattern
       bool reversal = (c1 < o1) && (c1 < l2);
       
       if(pullback && reversal)
       {
-        // Calculate SL at swing high
         double swing_high = MathMax(h1, h2);
         double sl_buffer = 5 * point;
         double sl_price = swing_high + sl_buffer;
@@ -220,7 +206,7 @@ bool BuildSignal(Signal &out_sig)
             out_sig.sl = sl_price;
             out_sig.tp = tp_price;
             
-            LogEvent("SIGNAL", "✅ SHORT SCALP: Pullback reversal in downtrend (RSI=" + 
+            LogEvent("SIGNAL", "SHORT SCALP: Pullback reversal in downtrend (RSI=" + 
                      DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
                      DoubleToString(tp_dist_pts, 1) + "pts)");
             return true;
@@ -230,10 +216,8 @@ bool BuildSignal(Signal &out_sig)
     }
   }
   
-  // RANGE MODE - Extreme reversals
   if(!trendMode)
   {
-    // LONG setup: oversold + bullish reversal from bottom
     if(rsi <= RSI_Buy_Threshold)
     {
       bool reversal = (c1 > o1) && (c1 > h2);
@@ -263,7 +247,7 @@ bool BuildSignal(Signal &out_sig)
             out_sig.sl = sl_price;
             out_sig.tp = tp_price;
             
-            LogEvent("SIGNAL", "✅ LONG SCALP: Range reversal from oversold (RSI=" + 
+            LogEvent("SIGNAL", "LONG SCALP: Range reversal from oversold (RSI=" + 
                      DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
                      DoubleToString(tp_dist_pts, 1) + "pts)");
             return true;
@@ -272,7 +256,6 @@ bool BuildSignal(Signal &out_sig)
       }
     }
     
-    // SHORT setup: overbought + bearish reversal from top
     if(rsi >= RSI_Sell_Threshold)
     {
       bool reversal = (c1 < o1) && (c1 < l2);
@@ -302,7 +285,7 @@ bool BuildSignal(Signal &out_sig)
             out_sig.sl = sl_price;
             out_sig.tp = tp_price;
             
-            LogEvent("SIGNAL", "✅ SHORT SCALP: Range reversal from overbought (RSI=" + 
+            LogEvent("SIGNAL", "SHORT SCALP: Range reversal from overbought (RSI=" + 
                      DoubleToString(rsi, 2) + " SL=" + DoubleToString(sl_dist_pts, 1) + "pts TP=" + 
                      DoubleToString(tp_dist_pts, 1) + "pts)");
             return true;
@@ -325,56 +308,43 @@ void OnTick()
   TM_DD_Update(now);
   TM_ManageOpenPositions();
 
-  if(!PreTradeGate(now)) 
+  if(!PreTradeGate(now))
   {
-    int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-    double dd = DD_CurrentPercent();
-    double atr_val = ATR(1);
-    long margin = AccountInfoInteger(ACCOUNT_MARGIN_LEVEL);
-    string reason = "";
-    
-    if(!TM_DD_GateOK())
-      reason += "DD=" + DoubleToString(dd, 2) + "% ";
-    if(spread > Max_Spread_Points)
-      reason += "Spread=" + IntegerToString(spread) + "pts ";
-    if(atr_val != EMPTY_VALUE && atr_val < Min_ATR_Points)
-      reason += "ATR=" + DoubleToString(atr_val, 2) + " ";
-    if(!DayAllowed(now))
-      reason += "Day-Off ";
-    if(g_noTradeUntil > 0 && now < g_noTradeUntil)
-      reason += "Pause-Until=" + TimeToString(g_noTradeUntil) + " ";
-    if(margin > 0 && margin < 200)
-      reason += "Margin=" + IntegerToString(margin) + "% ";
-    
-    LogEvent("GATE", "Blocked: " + reason);
     return;
   }
-  
+
   // One Position at a Time check
   int myPositions = 0;
-  for(int i = PositionsTotal() - 1; i >= 0; --i)
-  {
-    if(PositionSelectByIndex(i))
-    {
-      if(PositionGetInteger(POSITION_MAGIC) == MAGIC_BASE + Magic_Offset &&
-         PositionGetString(POSITION_SYMBOL) == _Symbol)
+  int total_positions = PositionsTotal();
+  int pos_idx = total_positions - 1;
+
+   while(pos_idx >= 0)
+   {
+      ulong ticket = PositionGetTicket(pos_idx);
+      if(ticket > 0 && PositionSelectByTicket(ticket))
       {
-        myPositions++;
+         if(PositionGetInteger(POSITION_MAGIC) == MAGIC_BASE + Magic_Offset &&
+            PositionGetString(POSITION_SYMBOL) == _Symbol)
+         {
+            myPositions++;
+         }
       }
-    }
-  }
-  
+      pos_idx--;
+   }
+
   if(myPositions > 0)
   {
-    // Already an open position for this EA, skip new signal
     return;
   }
-  
-  if(!NewBarGuard(PERIOD_M5, g_lastBar_M5)) return;
+
+  if(!NewBarGuard(PERIOD_M5, g_lastBar_M5))
+  {
+    return;
+  }
 
   Signal sig;
-  
-  if(!BuildSignal(sig) || !sig.valid) 
+
+  if(!BuildSignal(sig) || !sig.valid)
   {
     return;
   }
@@ -394,19 +364,23 @@ void OnTick()
 
   double ref_price = (sig.dir == DIR_LONG) ? tick.ask : tick.bid;
   double lot = ComputeLot(ref_price, sig.sl);
-  
-  if(lot <= 0.0) 
-  { 
-    LogEvent("TRADE","lot=0; skip"); 
-    return; 
+
+  if(lot <= 0.0)
+  {
+    LogEvent("TRADE","lot=0; skip");
+    return;
   }
 
   ulong ticket = 0;
   bool sent = ExecuteMarketOrder(sig, lot, ticket);
 
   if(sent)
-    LogEvent("TRADE","✅ SENT: ticket=" + (string)ticket + " reason=" + sig.reason + " lot=" + DoubleToString(lot, 2));
+  {
+    LogEvent("TRADE","SENT: ticket=" + (string)ticket + " reason=" + sig.reason + " lot=" + DoubleToString(lot, 2));
+  }
   else
+  {
     LogError("TRADE","send failed", GetLastError());
+  }
 }
 //+------------------------------------------------------------------+
