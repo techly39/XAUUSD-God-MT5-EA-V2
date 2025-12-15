@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                  XAUUSD-GOD.mq5 |
 //|                                      XAUUSD Algorithmic Trading |
-//|                                                   V2 - M15 SCALPER|
+//|                                                   V2 - M5 SCALPER|
 //+------------------------------------------------------------------+
 #property copyright "XAUUSD-GOD"
 #property link      ""
@@ -9,7 +9,7 @@
 #property strict
 
 // Global variables must be declared BEFORE includes that reference them
-datetime g_lastBar_M15 = 0;
+datetime g_lastBar_M5 = 0;
 datetime g_noTradeUntil = 0;
 
 #include <inc/types.mqh>
@@ -31,9 +31,9 @@ input group "XAUUSD-GOD V2 Settings"
 //+------------------------------------------------------------------+
 int OnInit()
 {
-  LogInit("XAUUSD-GOD-M15-V2");
+  LogInit("XAUUSD-GOD-M5-V2");
   const string sym = _Symbol;
-  const ENUM_TIMEFRAMES tf = PERIOD_M15;
+  const ENUM_TIMEFRAMES tf = PERIOD_M5;
 
   if(!InitIndicators(sym, tf))
   {
@@ -46,13 +46,13 @@ int OnInit()
     LogError("INIT","Trading not allowed for symbol", GetLastError()); 
   }
 
-  datetime t0 = iTime(sym, PERIOD_M15, 0);
-  if(t0 > 0) g_lastBar_M15 = t0;
+  datetime t0 = iTime(sym, PERIOD_M5, 0);
+  if(t0 > 0) g_lastBar_M5 = t0;
 
   g_noTradeUntil = 0;
   EnsureTradeInit();
 
-  LogEvent("INIT","OK - M15 Timeframe - Scalping Mode");
+  LogEvent("INIT","OK - M5 Timeframe - Scalping Mode");
   return(INIT_SUCCEEDED);
 }
 
@@ -82,7 +82,7 @@ bool PreTradeGate(const datetime server_time)
 }
 
 //+------------------------------------------------------------------+
-//| Build signal based on M15 scalping logic                         |
+//| Build signal based on M5 scalping logic                         |
 //+------------------------------------------------------------------+
 bool BuildSignal(Signal &out_sig)
 {
@@ -103,13 +103,13 @@ bool BuildSignal(Signal &out_sig)
     return false;
   }
 
-  double c1 = iClose(_Symbol, PERIOD_M15, 1);
-  double o1 = iOpen(_Symbol, PERIOD_M15, 1);
-  double h1 = iHigh(_Symbol, PERIOD_M15, 1);
-  double l1 = iLow(_Symbol, PERIOD_M15, 1);
-  double c2 = iClose(_Symbol, PERIOD_M15, 2);
-  double h2 = iHigh(_Symbol, PERIOD_M15, 2);
-  double l2 = iLow(_Symbol, PERIOD_M15, 2);
+  double c1 = iClose(_Symbol, PERIOD_M5, 1);
+  double o1 = iOpen(_Symbol, PERIOD_M5, 1);
+  double h1 = iHigh(_Symbol, PERIOD_M5, 1);
+  double l1 = iLow(_Symbol, PERIOD_M5, 1);
+  double c2 = iClose(_Symbol, PERIOD_M5, 2);
+  double h2 = iHigh(_Symbol, PERIOD_M5, 2);
+  double l2 = iLow(_Symbol, PERIOD_M5, 2);
   
   if(c1 == 0.0 || c1 == EMPTY_VALUE) return false;
 
@@ -337,7 +337,7 @@ void OnTick()
     return;
   }
 
-  if(!NewBarGuard(PERIOD_M15, g_lastBar_M15))
+  if(!NewBarGuard(PERIOD_M5, g_lastBar_M5))
   {
     return;
   }
@@ -376,7 +376,7 @@ void OnTick()
 
   if(sent)
   {
-    LogEvent("TRADE","SENT: ticket=" + (string)ticket + " reason=" + sig.reason + " lot=" + DoubleToString(lot, 2));
+    LogEvent("TRADE","SENT: ticke t=" + (string)ticket + " reason=" + sig.reason + " lot=" + DoubleToString(lot, 2));
   }
   else
   {
