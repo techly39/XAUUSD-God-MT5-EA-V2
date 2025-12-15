@@ -1,4 +1,4 @@
-#ifndef INC_CONFIG_INPUTS_MQH
+﻿#ifndef INC_CONFIG_INPUTS_MQH
 #define INC_CONFIG_INPUTS_MQH
 
 // ================== CORE INDICATORS (M15 SCALPING V2) ==================

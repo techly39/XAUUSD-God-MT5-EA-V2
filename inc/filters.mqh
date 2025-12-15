@@ -44,9 +44,12 @@ bool ATRSane()
    if(a == EMPTY_VALUE)
       return false;
    
-   return (a >= Min_ATR_Points);
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(point <= 0.0) return false;
+   
+   double atr_in_points = a / point;
+   return (atr_in_points >= Min_ATR_Points);
 }
-
 //+------------------------------------------------------------------+
 //| Check if current day is allowed for trading                      |
 //+------------------------------------------------------------------+

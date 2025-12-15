@@ -78,7 +78,9 @@ double ComputeLot(const double entry_price, const double sl_price)
 
    // Normalize to lot step
    double normalized = MathFloor((lot - min_vol) / lot_step) * lot_step + min_vol;
+   
    lot = NormalizeDouble(normalized, 2);
+   
 
    return lot;
 }

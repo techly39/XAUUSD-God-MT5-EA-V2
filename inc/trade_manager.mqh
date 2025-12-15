@@ -10,19 +10,15 @@
 #include "orders.mqh"
 #include <Trade/Trade.mqh>
 
-// External reference to global pause timer declared in main EA
 extern datetime g_noTradeUntil;
 
-// Consecutive loss tracking - static variables persist across ticks
 static int g_loss_streak = 0;
 static bool g_position_was_open = false;
 
-// Daily drawdown tracking
 int    g_dd_day          = -1;
 double g_dd_start_equity = 0.0;
 double g_dd_peak_equity  = 0.0;
 
-// Weekly drawdown tracking
 int    g_last_day_of_week     = -1;
 double g_week_start_equity    = 0.0;
 double g_week_peak_equity     = 0.0;
@@ -66,20 +62,17 @@ void DD_UpdateInternal(datetime tv)
    MqlDateTime dt;
    TimeToStruct(tv, dt);
    
-   // Daily reset logic
    if(NewServerDay(tv) || g_dd_day < 0) 
    {
       DD_Reset(tv);
       
-      // Weekly reset on Monday
-      if(dt.day_of_week == 1)
+      if(dt.day_of_week == 0)
       {
          g_week_start_equity = AccountInfoDouble(ACCOUNT_EQUITY);
          g_week_peak_equity = g_week_start_equity;
       }
    }
    
-   // Initialize weekly tracking on first run if not Monday
    if(g_week_peak_equity <= 0.0)
    {
       double eq = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -87,14 +80,12 @@ void DD_UpdateInternal(datetime tv)
       g_week_peak_equity = eq;
    }
    
-   // Update peaks
    double eq = AccountInfoDouble(ACCOUNT_EQUITY);
    if(eq > g_dd_peak_equity) 
       g_dd_peak_equity = eq;
    if(eq > g_week_peak_equity)
       g_week_peak_equity = eq;
    
-   // Track day of week for weekly reset detection
    g_last_day_of_week = dt.day_of_week;
 }
 
@@ -276,12 +267,15 @@ bool TM_ManageOpenPositions()
    if(!SymbolInfoTick(_Symbol, tick)) 
       return false;
 
-   // ==================== CONSECUTIVE LOSS TRACKING ====================
    // Count current open positions for this EA
    int count = 0;
-   for(int i = PositionsTotal() - 1; i >= 0; --i)
+   int total_pos = PositionsTotal();
+   int pos_idx = total_pos - 1;
+
+   while(pos_idx >= 0)
    {
-      if(PositionSelectByIndex(i))
+      ulong ticket = PositionGetTicket(pos_idx);
+      if(ticket > 0 && PositionSelectByTicket(ticket))
       {
          if(PositionGetInteger(POSITION_MAGIC) == MAGIC_BASE + Magic_Offset &&
             PositionGetString(POSITION_SYMBOL) == _Symbol)
@@ -289,22 +283,21 @@ bool TM_ManageOpenPositions()
             count++;
          }
       }
+      pos_idx--;
    }
    
-   // If previously there was an open position and now count is 0, a position closed
    if(g_position_was_open && count == 0)
    {
-      // Determine outcome of last closed trade
       double profitSum = 0.0;
       
-      // Use HistoryDeal to find last closed deal for our magic+symbol
-      datetime since = TimeCurrent() - 86400; // look back last 24h
+      datetime since = TimeCurrent() - 86400;
       HistorySelect(since, TimeCurrent());
       long totalDeals = HistoryDealsTotal();
       
-      for(long i = totalDeals - 1; i >= 0; --i)
+      long deal_idx = totalDeals - 1;
+      while(deal_idx >= 0)
       {
-         ulong dealTicket = HistoryDealGetTicket(i);
+         ulong dealTicket = HistoryDealGetTicket((int)deal_idx);
          ulong dealMagic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
          string dealSymbol = HistoryDealGetString(dealTicket, DEAL_SYMBOL);
          long dealEntryType = HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
@@ -316,75 +309,73 @@ bool TM_ManageOpenPositions()
                                HistoryDealGetDouble(dealTicket, DEAL_COMMISSION) +
                                HistoryDealGetDouble(dealTicket, DEAL_SWAP);
             profitSum += dealProfit;
-            // Break after summing (though partial closings would generate multiple deals, profitSum accumulates them)
-            // In our case with no partial, one deal corresponds to entire trade closure
             break;
          }
+         deal_idx--;
       }
       
       if(profitSum < -0.0001)
       {
-         // Loss
          g_loss_streak++;
          LogEvent("TM", "Trade closed with loss. Loss streak: " + IntegerToString(g_loss_streak));
       }
       else if(profitSum > 0.0001)
       {
-         // Win
          g_loss_streak = 0;
          LogEvent("TM", "Trade closed with profit. Loss streak reset.");
       }
       else
       {
-         // Roughly 0 (breakeven)
          g_loss_streak = 0;
          LogEvent("TM", "Trade closed at breakeven. Loss streak reset.");
       }
       
-      // Check loss streak vs limit
       if(g_loss_streak >= Consecutive_Loss_Limit && Consecutive_Loss_Limit > 0)
       {
-         g_loss_streak = 0; // reset streak count after triggering pause
+         g_loss_streak = 0;
          g_noTradeUntil = TimeCurrent() + Loss_Pause_Duration_Min * 60;
-         // Log pause event
          LogEvent("TM", "Max loss streak reached, pausing new trades for " +
                   IntegerToString(Loss_Pause_Duration_Min) + " min");
       }
    }
    
-   // Update flag for next tick
    g_position_was_open = (count > 0);
-   // ==================== END CONSECUTIVE LOSS TRACKING ====================
 
    int total = PositionsTotal();
    int lp = total - 1;
+   
    while(lp >= 0)
    {
       ulong ticket = PositionGetTicket(lp);
       if(ticket > 0)
       {
-         if(!PositionSelectByTicket(ticket)) continue;
+         if(!PositionSelectByTicket(ticket)) 
+         {
+            lp--;
+            continue;
+         }
+         
          string sym = PositionGetString(POSITION_SYMBOL);
          if(sym == _Symbol)
          {
             long magic = PositionGetInteger(POSITION_MAGIC);
             if(magic == (MAGIC_BASE + Magic_Offset))
             {
-               ulong  ticket   = (ulong)PositionGetInteger(POSITION_TICKET);
+               ulong  position_ticket = (ulong)PositionGetInteger(POSITION_TICKET);
                long   pos_type = PositionGetInteger(POSITION_TYPE);
                double entry    = PositionGetDouble(POSITION_PRICE_OPEN);
                double cur_sl   = PositionGetDouble(POSITION_SL);
                double ref      = (pos_type == POSITION_TYPE_BUY) ? tick.ask : tick.bid;
 
-               if(ApplyBreakEven(ticket, pos_type, entry, ref, cur_sl)) 
+               if(ApplyBreakEven(position_ticket, pos_type, entry, ref, cur_sl)) 
                   changed = true;
 
                cur_sl = PositionGetDouble(POSITION_SL);
 
-               if(ApplyTrailing(ticket, pos_type, ref, cur_sl)) 
+               if(ApplyTrailing(position_ticket, pos_type, ref, cur_sl)) 
                   changed = true;
 
-               if(ApplyPartial(sym, ticket, pos_type, entry, ref)) 
+               if(ApplyPartial(sym, position_ticket, pos_type, entry, ref)) 
                   changed = true;
             }
          }
@@ -394,4 +385,4 @@ bool TM_ManageOpenPositions()
    return changed;
 }
 
-#endif // INC_TRADE_MANAGER_MQH
+#endif
