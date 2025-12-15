@@ -1,9 +1,9 @@
 #ifndef INC_CONFIG_INPUTS_MQH
 #define INC_CONFIG_INPUTS_MQH
 
-// ================== CORE INDICATORS (M5 SCALPING V2) ==================
+// ================== CORE INDICATORS (M15 SCALPING V2) ==================
 input group "Indicators"
-input int    EMA_Trend_Period      = 50;    // Primary trend EMA for M5
+input int    EMA_Trend_Period      = 50;    // Primary trend EMA for M15
 input int    ADX_Period            = 14;
 input double ADX_Trend_Threshold   = 20.0;  // Lowered for sensitivity
 input int    RSI_Period            = 14;
