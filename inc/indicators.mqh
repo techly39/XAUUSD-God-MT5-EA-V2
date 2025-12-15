@@ -54,7 +54,7 @@ void FreeIndicators()
 }
 
 //+------------------------------------------------------------------+
-//| FIXED: Proper ArraySetAsSeries and array sizing                  |
+//| ATR indicator value at specified bar                             |
 //+------------------------------------------------------------------+
 double ATR(const int bar_index)
 {
@@ -72,6 +72,9 @@ double ATR(const int bar_index)
    return arr[bar_index];
 }
 
+//+------------------------------------------------------------------+
+//| ADX indicator value at specified bar                             |
+//+------------------------------------------------------------------+
 double ADX(const int bar_index)
 {
    if(bar_index < 0) return EMPTY_VALUE;
@@ -88,6 +91,9 @@ double ADX(const int bar_index)
    return arr[bar_index];
 }
 
+//+------------------------------------------------------------------+
+//| EMA indicator value at specified bar                             |
+//+------------------------------------------------------------------+
 double EMA(const int bar_index)
 {
    if(bar_index < 0) return EMPTY_VALUE;
@@ -104,6 +110,9 @@ double EMA(const int bar_index)
    return arr[bar_index];
 }
 
+//+------------------------------------------------------------------+
+//| RSI indicator value at specified bar                             |
+//+------------------------------------------------------------------+
 double RSI(const int bar_index)
 {
    if(bar_index < 0) return EMPTY_VALUE;
@@ -118,33 +127,6 @@ double RSI(const int bar_index)
       return EMPTY_VALUE;
    
    return arr[bar_index];
-}
-
-//+------------------------------------------------------------------+
-//| FIXED: Proper volume MA calculation with ArraySetAsSeries        |
-//+------------------------------------------------------------------+
-double VolumeMA(const int bar_index)
-{
-   if(Vol_MA_Period <= 0) return EMPTY_VALUE;
-   if(bar_index < 0) return EMPTY_VALUE;
-   
-   int start_bar = bar_index;
-   int count = Vol_MA_Period;
-   
-   long vol_arr[];
-   ArraySetAsSeries(vol_arr, true);
-   int copied = CopyTickVolume(g_symbol, g_tf, 0, start_bar + count, vol_arr);
-   
-   if(copied < (start_bar + count))
-      return EMPTY_VALUE;
-   
-   double sum = 0.0;
-   for(int i = start_bar; i < start_bar + Vol_MA_Period; i++)
-   {
-      sum += (double)vol_arr[i];
-   }
-   
-   return sum / Vol_MA_Period;
 }
 
 #endif // INC_INDICATORS_MQH
