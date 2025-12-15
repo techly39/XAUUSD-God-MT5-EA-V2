@@ -3,7 +3,7 @@
 
 #define EA_VERSION "XAUUSD-GOD 2.0"
 #define SYMBOL_TARGET "XAUUSD"
-#define TF_TARGET PERIOD_M15
+#define TF_TARGET PERIOD_M5
 
 const long MAGIC_BASE = 66050001;
 
