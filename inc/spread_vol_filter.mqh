@@ -2,7 +2,6 @@
 //|                                            spread_vol_filter.mqh |
 //|                                         XAUUSD-GOD EA Project    |
 //|                            Enhanced Pre-Trade Gate Functions     |
-//|                                                         Task C   |
 //+------------------------------------------------------------------+
 #ifndef INC_SPREAD_VOL_FILTER_MQH
 #define INC_SPREAD_VOL_FILTER_MQH
@@ -11,8 +10,10 @@
 #include "utils.mqh"
 #include "config_inputs.mqh"
 
+// External reference to global pause timer declared in main EA
+extern datetime g_noTradeUntil;
+
 // Global pause timers for edge-case protections (file-scoped, internal to this module)
-// NOTE: g_noTradeUntil is declared in main EA, NOT here - it's set by loss streak logic
 static datetime g_spreadSpikeUntil = 0;    // Spread spike pause (10min)
 static datetime g_flashCrashUntil = 0;     // Flash crash pause (30min)
 
@@ -23,14 +24,16 @@ static datetime g_flashCrashUntil = 0;     // Flash crash pause (30min)
 bool CanTradeNow(const string symbol, const datetime server_time)
 {
    // Static variables for spread spike tracking
-   static double spread_history[60];
+   static double spread_history[];
    static int spread_index = 0;
    static datetime last_spread_update = 0;
    static bool first_run = true;
-   
+
    // Initialize spread history array on first call
    if(first_run)
    {
+      int array_size = (SpreadSpike_MinSamples > 0 && SpreadSpike_MinSamples <= 60) ? SpreadSpike_MinSamples : 30;
+      ArrayResize(spread_history, array_size);
       ArrayInitialize(spread_history, 0.0);
       first_run = false;
    }
@@ -105,14 +108,14 @@ bool CanTradeNow(const string symbol, const datetime server_time)
          if(current_time - last_spread_update >= 1)
          {
             spread_history[spread_index] = current_spread_pts;
-            spread_index = (spread_index + 1) % 60;
+            spread_index = (spread_index + 1) % ArraySize(spread_history);
             last_spread_update = current_time;
          }
-         
-         // Calculate 60-second moving average
+
+         // Calculate moving average based on configured window size
          double spread_sum = 0.0;
          int valid_count = 0;
-         for(int i = 0; i < 60; i++)
+         for(int i = 0; i < ArraySize(spread_history); i++)
          {
             if(spread_history[i] > 0.0)
             {
@@ -138,8 +141,6 @@ bool CanTradeNow(const string symbol, const datetime server_time)
       return false;
    
    // 8. FLASH CRASH PROTECTION (30 minutes pause)
-   // Note: This check should be called every tick for immediate detection
-   // If called only on M5 bar close, delay up to 5 minutes may occur
    // Pause if M1 candle range exceeds 500 pips ($5.00)
    double m1_high = iHigh(symbol, PERIOD_M1, 1);
    double m1_low = iLow(symbol, PERIOD_M1, 1);
