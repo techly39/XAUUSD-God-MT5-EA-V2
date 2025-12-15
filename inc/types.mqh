@@ -1,7 +1,6 @@
 #ifndef INC_TYPES_MQH
 #define INC_TYPES_MQH
 
-enum Regime    { REGIME_RANGE = 0, REGIME_TREND = 1 };
 enum Direction { DIR_NONE = -1, DIR_LONG = 0,  DIR_SHORT  = 1 };
 enum OrderType { ORDER_MARKET = 0, ORDER_PENDING = 1 };
 enum TPMode    { TP_NONE = 0, TP_FIXED = 1, TP_RR = 2 };
@@ -14,22 +13,11 @@ struct Settings {
    int    ATR_Period;
    double ATR_Mult_SL_Range;
    double ATR_Mult_SL_Trend;
-   int    Range_Lookback_Bars;
-   int    Range_Min_Width_Points;
-   int    Range_Max_Width_Points;
-   int    Sweep_Buffer_Points;
-   int    Sweep_Reentry_Confirm_Bars;
-   int    Breakout_Lookback;
-   int    Breakout_CloseBeyond_Points;
    int    RSI_Period;
    int    RSI_Buy_Threshold;
    int    RSI_Sell_Threshold;
-   int    RSI_Exit;
-   int    Vol_MA_Period;
-   double Vol_Min_Ratio;
    int    Order_Type;
    int    Max_Slippage_Points;
-   int    Pending_Offset_Points;
    int    Order_Expiration_Min;
    int    Risk_Mode;
    double Fixed_Lot;
